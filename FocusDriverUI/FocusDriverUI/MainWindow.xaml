@@ -1,0 +1,26 @@
+﻿<Window xmlns:Controls="clr-namespace:FocusDriverUI.Controls"  x:Class="FocusDriverUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:FocusDriverUI"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="350" Width="525">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Name="ToolbarRow" Height="30" />
+            <RowDefinition Name="ContentRow" Height="3*" />
+            <RowDefinition Name="ConsoleRow" Height="2*" />
+        </Grid.RowDefinitions>
+        <ToolBar Grid.Row="0">
+            <ToggleButton Name="LogButton" Click="LogButton_OnClick" IsChecked="True">
+                <Image Name="LogButtonImage" Source="Content/Icons/Log_48x.png" />
+            </ToggleButton>
+            <Button Name="RefreshButton" Click="RefreshButton_OnClick">
+                <Image Name="RefreshButtonImage" Source="Content/Icons/Refresh_grey_48x.png" />
+            </Button>
+        </ToolBar>
+        
+        <Controls:ConsoleLogger x:Name="Logger" Grid.Row="2"/>
+    </Grid>
+</Window>
