@@ -1,11 +1,23 @@
 #include "ReturnCode.h"
 
 //Pins
-#define StepPin 2
-#define DirectionPin 3
+#define StepPin 2 // ANY TOGGLE is step motor
+#define DirectionPin 3 // LOW is forward, HIGH is reverse
 #define ModeSet1Pin 4
 #define ModeSet2Pin 5
-#define EnablePin 6
+#define EnablePin 6 // HIGH is Disabled, LOW is Enabled
+
+/**********************************************
+* Microstep Select Resolution Truth Table     *
+*                                             *
+*  MS1 	MS2 	Microstep Resolution          *
+*  ---------------------------------          *
+*   L	  L	Full Step (2 Phase)           *
+*   H	  L	Half Step                     *
+*   L	  H	Quarter Step                  *
+*   H  	  H	Eigth Step                    *
+*                                             *
+**********************************************/
 
 //Constants
 #define MAX_BYTES 7
@@ -15,27 +27,39 @@
 
 //Globals
 byte inputBytes[MAX_BYTES]; //input command buffer
-bool isSeeking;
-bool isLimitSet;
 bool isDebugEnabled;
 bool isEnabled;
+bool isLimitSet;
+bool isSeeking;
+bool stepPhase;
 int currentStep;
-int targetStep;
+int enablePinStateCheck;
 int limitStep;
+int targetStep;
+
 
 /************************************
 *  Core Logic                       *
 ************************************/
 
 void setup() {
+  pinMode(StepPin, OUTPUT);
+  pinMode(DirectionPin, OUTPUT);
+  pinMode(ModeSet1Pin, OUTPUT);
+  pinMode(ModeSet2Pin, OUTPUT);
+  pinMode(EnablePin, OUTPUT);
+  ResetMotorDriverPins(); 
+  
   isLimitSet = false;
   isSeeking = false;
   isDebugEnabled = false;
+  isEnabled = false;
+  stepPhase = false;
 
   currentStep = 0;
+  enablePinStateCheck = 0;
   targetStep = 0;
   limitStep = 0;
-  isEnabled = 0;
 
   memset(inputBytes, 0, sizeof(inputBytes));
   
@@ -57,7 +81,12 @@ void loop() {
     }
   }
   
-  WorkStep();
+  SyncPinStates();
+  
+  if(isEnabled)
+  {
+    WorkStepperMotor();
+  }
 }
 
 void ProcessCommand()
@@ -73,6 +102,14 @@ void ProcessCommand()
   else if(inputBytes[0] == 'D')
   {
     HandleEnableDebug(); 
+  }
+  else if(inputBytes[0] == 'e')
+  {
+    HandleLineDisable(); 
+  }
+  else if(inputBytes[0] == 'E')
+  {
+    HandleLineEnable();
   }
   else if(inputBytes[0] == 'H')
   {
@@ -118,8 +155,19 @@ void ProcessCommand()
   memset(inputBytes, 0, sizeof(inputBytes));
 }
 
-void WorkStep()
+void SyncPinStates()
 {
+  //sync pin states with logical flags
+  enablePinStateCheck = digitalRead(EnablePin);
+  if(isEnabled != enablePinStateCheck)
+  {
+    ToggleEnabledPin();  
+  }
+}
+
+void WorkStepperMotor()
+{
+  // seek the motor if required
   if(isSeeking && currentStep != targetStep)
   {    
     int seekDifference = abs(currentStep - targetStep);
@@ -187,6 +235,18 @@ void HandleEnableDebug()
   HandleReturnCode(OK);
 }
 
+void HandleLineDisable()
+{
+  isEnabled = false;
+  HandleReturnCode(OK);
+}
+
+void HandleLineEnable()
+{
+  isEnabled = true;
+  HandleReturnCode(OK);
+}
+
 void HandleHardStopCommand()
 {
   if(isSeeking)
@@ -205,6 +265,18 @@ void HandleInfoCommand()
 {
   switch(inputBytes[1])
   {
+    case 'C':
+      Serial.write("IC");
+      Serial.print(currentStep);
+      break;
+    case 'D':
+      Serial.write("ID");
+      Serial.print(isDebugEnabled);
+      break;
+    case 'E':
+      Serial.write("IE");
+      Serial.print(isEnabled);
+      break;
     case 'l':
       Serial.write("Il");
       Serial.print(isLimitSet);
@@ -217,17 +289,9 @@ void HandleInfoCommand()
       Serial.write("IS");
       Serial.print(isSeeking);
       break;
-    case 'C':
-      Serial.write("IC");
-      Serial.print(currentStep);
-      break;
     case 'T':
       Serial.write("IT");
       Serial.print(targetStep);
-      break;
-    case 'D':
-      Serial.write("ID");
-      Serial.print(isDebugEnabled);
       break;
     default:
       HandleReturnCode(UnknownCommand);
@@ -452,7 +516,7 @@ void HandleCommandNotFoundVerbose()
 }
 
 /************************************
-*  Converstion Methods              *
+*  Utilty Methods                   *
 ************************************/
 
 int ConvertBufferToInt()
@@ -486,6 +550,18 @@ int ConvertBufferToInt()
   return atoi(digits);
 }
 
+void ResetMotorDriverPins()
+{
+  digitalWrite(StepPin, LOW);
+  digitalWrite(DirectionPin, LOW);
+  digitalWrite(ModeSet1Pin, LOW);
+  digitalWrite(ModeSet2Pin, LOW);
+  digitalWrite(EnablePin, HIGH);
+  
+  stepPhase = false;
+  isEnabled = false;
+}
+
 /************************************
 *  Servo Helpe Methods              *
 ************************************/
@@ -508,6 +584,18 @@ void RollStepperForward(int steps)
     
     PrintCurrentStep();
   } 
+}
+
+void ToggleEnabledPin()
+{
+  if(isEnabled)
+  {
+    digitalWrite(EnablePin, HIGH);
+  }
+  else
+  {
+    digitalWrite(EnablePin, LOW);
+  }  
 }
 
 /************************************
