@@ -1,4 +1,5 @@
 #include "ReturnCode.h"
+#include "StepMode.h"
 
 //Pins
 #define StepPin 2 // ANY TOGGLE is step motor
@@ -31,11 +32,11 @@ bool isDebugEnabled;
 bool isEnabled;
 bool isLimitSet;
 bool isSeeking;
-bool stepPhase;
+bool stepPhase; 
 int currentStep;
-int enablePinStateCheck;
 int limitStep;
 int targetStep;
+StepMode currentStepMode;
 
 
 /************************************
@@ -50,6 +51,8 @@ void setup() {
   pinMode(EnablePin, OUTPUT);
   ResetMotorDriverPins(); 
   
+  memset(inputBytes, 0, sizeof(inputBytes));
+  
   isLimitSet = false;
   isSeeking = false;
   isDebugEnabled = false;
@@ -57,12 +60,11 @@ void setup() {
   stepPhase = false;
 
   currentStep = 0;
-  enablePinStateCheck = 0;
   targetStep = 0;
   limitStep = 0;
-
-  memset(inputBytes, 0, sizeof(inputBytes));
   
+  currentStepMode = FullStep;
+
   Serial.begin(115200, SERIAL_8N1);
   Serial.flush();
 
@@ -127,6 +129,10 @@ void ProcessCommand()
   {
     HandleLimitSetCommand();
   }
+  else if(inputBytes[0] == 'M')
+  {
+    HandleSetModeCommand();
+  }
   else if(inputBytes[0] == 's')
   {
     HandleStepReverseCommand();
@@ -158,11 +164,20 @@ void ProcessCommand()
 void SyncPinStates()
 {
   //sync pin states with logical flags
-  enablePinStateCheck = digitalRead(EnablePin);
+  bool enablePinStateCheck = digitalRead(EnablePin);
   if(isEnabled != enablePinStateCheck)
   {
     ToggleEnabledPin();  
   }
+  
+  bool modeSet1StateCheck = digitalRead(ModeSet1Pin);
+  bool modeSet2StateCheck = digitalRead(ModeSet2Pin);
+  StepMode pinStateStepMode = ConvertPinStateToStateMode(modeSet1StateCheck, modeSet2StateCheck);
+  if(currentStepMode != pinStateStepMode)
+  {
+    SetStepMode(currentStepMode);  
+  }
+  
 }
 
 void WorkStepperMotor()
@@ -285,6 +300,12 @@ void HandleInfoCommand()
       Serial.write("IL");
       Serial.print(limitStep);
       break;
+    case 'M':
+      Serial.write("IM");
+      Serial.print(limitStep);
+      Serial.print(ConvertStepModeToId(currentStepMode), DEC);
+      PrintModeSetLineState();
+      break;
     case 'S':
       Serial.write("IS");
       Serial.print(isSeeking);
@@ -298,6 +319,14 @@ void HandleInfoCommand()
       return;
   }
   Serial.write("\n");
+}
+
+void PrintModeSetLineState()
+{  
+  bool modeSet1State = digitalRead(ModeSet1Pin);
+  bool modeSet2State = digitalRead(ModeSet2Pin);
+  Serial.print(modeSet1State, DEC);
+  Serial.print(modeSet2State, DEC);  
 }
 
 void HandleLimitUnSetCommand()
@@ -323,6 +352,14 @@ void HandleLimitSetCommand()
   
   limitStep = currentStep;
   isLimitSet = true;
+  HandleReturnCode(OK);
+}
+
+void HandleSetModeCommand()
+{
+  int modeId = ConvertBufferToInt();
+  StepMode requestedMode = ConvertIdToStepMode(modeId);
+  currentStepMode = requestedMode;
   HandleReturnCode(OK);
 }
 
@@ -550,6 +587,58 @@ int ConvertBufferToInt()
   return atoi(digits);
 }
 
+StepMode ConvertIdToStepMode(int modeId)
+{
+  switch(modeId)
+  {
+    case 0:
+     return FullStep;
+    case 1:
+     return HalfStep;
+    case 2:
+     return QuarterStep;
+    case 3:
+     return EigthStep;
+    default:
+     return FullStep;
+  }
+}
+
+StepMode ConvertPinStateToStateMode(bool modeSet1, bool modeSet2)
+{
+  if(modeSet1 && modeSet2)
+  {
+    return EigthStep;
+  }
+  else if(!modeSet1 && modeSet2)
+  {
+    return QuarterStep;
+  }
+  else if(modeSet1 && !modeSet2)
+  {
+    return HalfStep;
+  }
+  else
+  {
+    return FullStep;
+  }
+}
+
+int ConvertStepModeToId(StepMode mode)
+{
+  switch(mode)
+  {
+    case FullStep:
+      return 0;
+    case HalfStep:
+      return 1;
+    case QuarterStep:
+      return 2;
+    case EigthStep:
+      return 3;
+  }  
+}
+
 void ResetMotorDriverPins()
 {
   digitalWrite(StepPin, LOW);
@@ -584,6 +673,29 @@ void RollStepperForward(int steps)
     
     PrintCurrentStep();
   } 
+}
+
+void SetStepMode(StepMode currentStepMode)
+{
+  switch(currentStepMode)
+  {
+    case FullStep:
+      digitalWrite(ModeSet1Pin, LOW);
+      digitalWrite(ModeSet2Pin, LOW);
+      break;
+    case HalfStep:
+      digitalWrite(ModeSet1Pin, HIGH);
+      digitalWrite(ModeSet2Pin, LOW);
+      break;
+    case QuarterStep:
+      digitalWrite(ModeSet1Pin, LOW);
+      digitalWrite(ModeSet2Pin, HIGH);
+      break;
+    case EigthStep:
+      digitalWrite(ModeSet1Pin, HIGH);
+      digitalWrite(ModeSet2Pin, HIGH);
+      break;
+  }  
 }
 
 void ToggleEnabledPin()
