@@ -1,90 +1,529 @@
-#define MAX_BYTES 5
+#include "ReturnCode.h"
 
-int incomingValue;
-int inputSize;
-int tokenCount;
+//Pins
+#define StepPin 2
+#define DirectionPin 3
+#define ModeSet1Pin 4
+#define ModeSet2Pin 5
+#define EnablePin 6
+
+//Constants
+#define MAX_BYTES 7
+#define MAX_STEP_BURST 5
+#define SIG_START_UP 1
+#define VERSION 1
+
+//Globals
+byte inputBytes[MAX_BYTES]; //input command buffer
+bool isSeeking;
+bool isLimitSet;
+bool isDebugEnabled;
+bool isEnabled;
 int currentStep;
 int targetStep;
-bool isSeeking;
 int limitStep;
-bool limitIsSet;
-byte inputBytes[MAX_BYTES];
+
+/************************************
+*  Core Logic                       *
+************************************/
 
 void setup() {
+  isLimitSet = false;
+  isSeeking = false;
+  isDebugEnabled = false;
+
   currentStep = 0;
   targetStep = 0;
   limitStep = 0;
-	limitIsSet = false;
-  isSeeking = false;
+  isEnabled = 0;
 
   memset(inputBytes, 0, sizeof(inputBytes));
   
-	Serial.begin(115200, SERIAL_8N1);
-	Serial.flush();
+  Serial.begin(115200, SERIAL_8N1);
+  Serial.flush();
 
-	Serial.write("Focuser Started Up\n");
+  HandleReturnCode(StartedUp);
 }
 
 void loop() {  
   if(Serial.available() > 0)
-  { 
-	  int bytesRead = Serial.readBytesUntil('\n', inputBytes, MAX_BYTES); //pull command from serial buffer
+  {
+    int bytesRead = Serial.readBytesUntil('\n', (char*)inputBytes, MAX_BYTES); //pull command from serial buffer
 
-	  if(inputBytes[0] != 240)
-	  {
-		  ProcessCommand(inputBytes);//process the command
-		  Serial.flush();
-	  }
+    if(inputBytes[0] != 240)
+    {
+      ProcessCommand();//process the command
+      Serial.flush();
+    }
   }
-
+  
   WorkStep();
 }
 
-void ProcessCommand(byte commandBytes[MAX_BYTES])
+void ProcessCommand()
 {
-	if(commandBytes[0] == 'V')
-	{
-		Serial.write("Focuser v0.1\n"); 
-	}
-  else if(commandBytes[0] == 'L')
+  if(inputBytes[0] == 'A')
   {
-    if(isSeeking)
-    {
-      Serial.write("Can not set limit while seeking.");
-      return;
-    }
-    
-    Serial.write("Setting limit to ");
-    Serial.print(currentStep);
-    Serial.write(".\n");
-
-    limitStep = currentStep;
-    limitIsSet = true;    
+    HandleAbsolutePositionCommand();
+  }
+  else if(inputBytes[0] == 'd')
+  {
+    HandleDisableDebug(); 
+  }
+  else if(inputBytes[0] == 'D')
+  {
+    HandleEnableDebug(); 
+  }
+  else if(inputBytes[0] == 'H')
+  {
+    HandleHardStopCommand();
+  }
+  else if(inputBytes[0] == 'I')
+  {
+    HandleInfoCommand(); 
+  }
+  else if(inputBytes[0] == 'l')
+  {
+    HandleLimitUnSetCommand();
+  }
+  else if(inputBytes[0] == 'L')
+  {
+    HandleLimitSetCommand();
+  }
+  else if(inputBytes[0] == 's')
+  {
+    HandleStepReverseCommand();
+  }
+  else if(inputBytes[0] == 'S')
+  {
+    HandleStepForwardCommand();
+  }
+  else if(inputBytes[0] == 'T')
+  {
+    HandleATOICommand();
+  }
+  else if(inputBytes[0] == 'V')
+  {
+    HandleVersionCommand();
+  }
+  else if(inputBytes[0] == 'Z')
+  {
+    HandleSetZeroCommand(); 
   }
   else
   {
-		Serial.write("Command not found (");
-		Serial.print(commandBytes[0], DEC);
-		Serial.write(",");
-		Serial.print(commandBytes[1], DEC);
-		Serial.write(",");
-		Serial.print(commandBytes[2], DEC);
-    Serial.write(",");
-    Serial.print(commandBytes[3], DEC);
-    Serial.write(",");
-    Serial.print(commandBytes[4], DEC);
-		Serial.write(").\n");
+    HandleReturnCode(UnknownCommand);
   }
   
-  //memset(commandBytes, 0, sizeof(commandBytes));
   memset(inputBytes, 0, sizeof(inputBytes));
 }
 
 void WorkStep()
 {
-  if(currentStep != targetStep)
-  {
-
+  if(isSeeking && currentStep != targetStep)
+  {    
+    int seekDifference = abs(currentStep - targetStep);
+    
+    int numberOfStepsToWork;
+    if(seekDifference > MAX_STEP_BURST)
+    {
+      numberOfStepsToWork = MAX_STEP_BURST; 
+    }
+    else
+    {
+      numberOfStepsToWork = seekDifference; 
+    }
+    
+    if(currentStep > targetStep)
+    {
+      RollStepperReverse(numberOfStepsToWork); 
+    }
+    else
+    {
+      RollStepperForward(numberOfStepsToWork); 
+    }
+    
+    if(currentStep == targetStep)
+    {
+      isSeeking = false; 
+    }
   }
 }
+
+/************************************
+*  Public Handlers                  *
+************************************/
+
+void HandleAbsolutePositionCommand()
+{
+  int absoluteStep = ConvertBufferToInt();
+    
+  if(absoluteStep < 0)
+  {
+    HandleReturnCode(BeyondZeroBound);
+    return;
+  }
+    
+  if(isLimitSet && absoluteStep > limitStep)
+  {
+    HandleReturnCode(BeyondLimitBound);   
+    return;
+  }
+    
+  targetStep = absoluteStep;
+  isSeeking = true;
+  HandleReturnCode(OK);
+}
+
+void HandleDisableDebug()
+{
+  isDebugEnabled = false;
+  HandleReturnCode(OK);
+}
+
+void HandleEnableDebug()
+{
+  isDebugEnabled = true;
+  HandleReturnCode(OK);
+}
+
+void HandleHardStopCommand()
+{
+  if(isSeeking)
+  {
+    isSeeking = false;
+    targetStep = currentStep;
+    HandleReturnCode(OK);
+  }
+  else
+  {
+    HandleReturnCode(NotCurrentlySeeking);
+  }
+}
+
+void HandleInfoCommand()
+{
+  switch(inputBytes[1])
+  {
+    case 'l':
+      Serial.write("Il");
+      Serial.print(isLimitSet);
+      break;
+    case 'L':
+      Serial.write("IL");
+      Serial.print(limitStep);
+      break;
+    case 'S':
+      Serial.write("IS");
+      Serial.print(isSeeking);
+      break;
+    case 'C':
+      Serial.write("IC");
+      Serial.print(currentStep);
+      break;
+    case 'T':
+      Serial.write("IT");
+      Serial.print(targetStep);
+      break;
+    case 'D':
+      Serial.write("ID");
+      Serial.print(isDebugEnabled);
+      break;
+    default:
+      HandleReturnCode(UnknownCommand);
+      return;
+  }
+  Serial.write("\n");
+}
+
+void HandleLimitUnSetCommand()
+{
+  if(isSeeking)
+  {
+    HandleReturnCode(CurrentlySeeking);
+    return;
+  }
+    
+  limitStep = 0;
+  isLimitSet = false;
+  HandleReturnCode(OK);
+}
+
+void HandleLimitSetCommand()
+{
+  if(isSeeking)
+  {
+    HandleReturnCode(CurrentlySeeking); 
+    return;
+  }
+  
+  limitStep = currentStep;
+  isLimitSet = true;
+  HandleReturnCode(OK);
+}
+
+void HandleStepReverseCommand()
+{
+  int relativeSteps = ConvertBufferToInt();    
+  int targetedPosition = currentStep - relativeSteps;
+   
+  if(targetedPosition < 0)
+  {
+    HandleReturnCode(BeyondZeroBound);
+    return;
+  }
+    
+  if(isLimitSet && targetedPosition > limitStep)
+  {
+    HandleReturnCode(BeyondLimitBound);
+    return;
+  }
+    
+  targetStep = targetedPosition;
+  isSeeking = true;
+  HandleReturnCode(OK);
+}
+
+void HandleStepForwardCommand()
+{
+  int relativeSteps = ConvertBufferToInt();  
+  int targetedPosition = currentStep + relativeSteps;
+    
+  if(targetedPosition < 0)
+  {
+    HandleReturnCode(BeyondZeroBound);
+    return;
+  }
+    
+  if(isLimitSet && targetedPosition > limitStep)
+  {
+    HandleReturnCode(BeyondLimitBound);
+    return;
+  }
+    
+  targetStep = targetedPosition;
+  isSeeking = true;
+  HandleReturnCode(OK);
+}
+
+void HandleATOICommand()
+{
+  if(!isDebugEnabled)
+  {
+     HandleReturnCode(DebugRequired);
+     return;
+  }
+  
+  Serial.write("Testing ATOI function.\n");
+  Serial.write("Recived following bytes:\n");
+  Serial.write(inputBytes[0]);
+  Serial.write(",");
+  Serial.write(inputBytes[1]);
+  Serial.write(",");
+  Serial.write(inputBytes[2]);
+  Serial.write(",");
+  Serial.write(inputBytes[3]);
+  Serial.write(",");
+  Serial.write(inputBytes[4]);
+  Serial.write(",");
+  Serial.write(inputBytes[5]);
+  Serial.write("\n");
+  Serial.print(inputBytes[0], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[1], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[2], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[3], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[4], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[5], DEC);
+  Serial.write("\n");  
+  int atoiResult = ConvertBufferToInt();
+  Serial.write("ATOI Result:");
+  Serial.print(atoiResult);
+  Serial.write("\n"); 
+}
+
+void HandleVersionCommand()
+{
+  HandleReturnCode(Version);
+}
+
+void HandleSetZeroCommand()
+{
+  if(isSeeking)
+  {
+    HandleReturnCode(CurrentlySeeking);
+    return;
+  }
+  
+  isLimitSet = false;
+  isSeeking = false;
+  isDebugEnabled = false;
+
+  currentStep = 0;
+  targetStep = 0;
+  limitStep = 0;
+  
+  HandleReturnCode(OK);
+}
+
+/************************************
+*  Internal Handlers                *
+************************************/
+
+void HandleReturnCode(ReturnCode code)
+{
+  switch(code)
+  {
+    case StartedUp:
+      if(SIG_START_UP)
+      {
+        Serial.write("R S\n");  
+      }
+      break;
+    case OK:
+      Serial.write("R OK\n");
+      break;
+    case Error:
+      Serial.write("R!ERR\n");
+      break;
+    case DebugRequired:
+      Serial.write("R DR\n");
+      break;
+    case UnknownCommand:
+      if(isDebugEnabled)
+      {
+        HandleCommandNotFoundVerbose();  
+      }
+      else
+      {
+        Serial.write("R!UC\n");  
+      }
+      break;
+    case Version:
+      Serial.write("R V");
+      Serial.print(VERSION);
+      Serial.write("\n");
+      break;
+    case CurrentlySeeking:
+      Serial.write("R!CS\n");
+      break;
+    case NotCurrentlySeeking:
+      Serial.write("R!NCS\n");
+      break;
+    case BeyondLimitBound:
+      Serial.write("R!BLB\n");
+      break;
+    case BeyondZeroBound:
+      Serial.write("R!BZB\n");
+      break;
+    default:
+      Serial.write("R!URC\n");
+      return;
+  }
+}
+
+void HandleCommandNotFoundVerbose()
+{
+  Serial.write("Command not found.\n");   
+  Serial.write("Recived following bytes:\n(");
+  Serial.write(inputBytes[0]);
+  Serial.write(inputBytes[1]);
+  Serial.write(inputBytes[2]);
+  Serial.write(inputBytes[3]);
+  Serial.write(inputBytes[4]);
+  Serial.write(inputBytes[5]);
+  Serial.write(")\n(");
+  Serial.print(inputBytes[0], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[1], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[2], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[3], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[4], DEC);
+  Serial.write(",");
+  Serial.print(inputBytes[5], DEC);
+  Serial.write(")\n");
+}
+
+/************************************
+*  Converstion Methods              *
+************************************/
+
+int ConvertBufferToInt()
+{
+  int digitCounter = 0;
+  int index = 1;
+  
+  while(true)
+  {
+    if(index == 6 || inputBytes[index] == 0)
+    {
+      break; 
+    }
+    
+    digitCounter++;
+    index++;
+  }
+  
+  if(digitCounter == 0)
+  {
+    return 0; 
+  }
+  
+  char digits[digitCounter];
+  
+  for(int i = 0; i < digitCounter; i++)
+  {
+    digits[i] = inputBytes[i + 1]; 
+  }
+  
+  return atoi(digits);
+}
+
+/************************************
+*  Servo Helpe Methods              *
+************************************/
+
+void RollStepperReverse(int steps)
+{
+  for(int i = 0; i < steps; i++)
+  {    
+    currentStep -= 1;
+    
+    PrintCurrentStep();
+  } 
+}
+
+void RollStepperForward(int steps)
+{
+  for(int i = 0; i < steps; i++)
+  {    
+    currentStep += 1;
+    
+    PrintCurrentStep();
+  } 
+}
+
+/************************************
+*  Debug Methods                    *
+************************************/
+
+void PrintCurrentStep() //This is run in debug mode to slow down the seeking behavior
+{
+  if(isDebugEnabled)
+  {
+    Serial.write("Current Step : ");
+    Serial.print(currentStep);
+    Serial.write("\n"); 
+  }
+}
+
+
+
 
