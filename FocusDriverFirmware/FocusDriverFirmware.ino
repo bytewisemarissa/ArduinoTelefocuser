@@ -31,8 +31,7 @@ byte inputBytes[MAX_BYTES]; //input command buffer
 bool isDebugEnabled;
 bool isEnabled;
 bool isLimitSet;
-bool isSeeking;
-bool stepPhase; 
+bool isSeeking; 
 int currentStep;
 int limitStep;
 int targetStep;
@@ -57,7 +56,6 @@ void setup() {
   isSeeking = false;
   isDebugEnabled = false;
   isEnabled = false;
-  stepPhase = false;
 
   currentStep = 0;
   targetStep = 0;
@@ -85,10 +83,7 @@ void loop() {
   
   SyncPinStates();
   
-  if(isEnabled)
-  {
-    WorkStepperMotor();
-  }
+  WorkStepperMotor();
 }
 
 void ProcessCommand()
@@ -199,11 +194,11 @@ void WorkStepperMotor()
     
     if(currentStep > targetStep)
     {
-      RollStepperReverse(numberOfStepsToWork); 
+      TriggerStepper(numberOfStepsToWork, false);
     }
     else
     {
-      RollStepperForward(numberOfStepsToWork); 
+      TriggerStepper(numberOfStepsToWork, true);
     }
     
     if(currentStep == targetStep)
@@ -290,7 +285,8 @@ void HandleInfoCommand()
       break;
     case 'E':
       Serial.write("IE");
-      Serial.print(isEnabled);
+      Serial.print(isEnabled, DEC);
+      PrintEnabledLineState();
       break;
     case 'l':
       Serial.write("Il");
@@ -306,6 +302,9 @@ void HandleInfoCommand()
       Serial.print(ConvertStepModeToId(currentStepMode), DEC);
       PrintModeSetLineState();
       break;
+    case 'R':
+      Serial.write("IR");
+      PrintDirectionLineState();
     case 'S':
       Serial.write("IS");
       Serial.print(isSeeking);
@@ -319,14 +318,6 @@ void HandleInfoCommand()
       return;
   }
   Serial.write("\n");
-}
-
-void PrintModeSetLineState()
-{  
-  bool modeSet1State = digitalRead(ModeSet1Pin);
-  bool modeSet2State = digitalRead(ModeSet2Pin);
-  Serial.print(modeSet1State, DEC);
-  Serial.print(modeSet2State, DEC);  
 }
 
 void HandleLimitUnSetCommand()
@@ -553,6 +544,30 @@ void HandleCommandNotFoundVerbose()
 }
 
 /************************************
+*  Info Command Handler Helpers     *
+************************************/
+
+void PrintEnabledLineState()
+{
+  bool enabledState = digitalRead(EnablePin);
+  Serial.print(enabledState, DEC);
+}
+
+void PrintModeSetLineState()
+{  
+  bool modeSet1State = digitalRead(ModeSet1Pin);
+  bool modeSet2State = digitalRead(ModeSet2Pin);
+  Serial.print(modeSet1State, DEC);
+  Serial.print(modeSet2State, DEC);  
+}
+
+void PrintDirectionLineState()
+{
+  bool directionState = digitalRead(DirectionPin);
+  Serial.print(directionState, DEC);
+}
+
+/************************************
 *  Utilty Methods                   *
 ************************************/
 
@@ -647,32 +662,51 @@ void ResetMotorDriverPins()
   digitalWrite(ModeSet2Pin, LOW);
   digitalWrite(EnablePin, HIGH);
   
-  stepPhase = false;
   isEnabled = false;
 }
 
 /************************************
-*  Servo Helpe Methods              *
+*  Stepper Helper Methods           *
 ************************************/
 
-void RollStepperReverse(int steps)
+void TriggerStepper(int steps, bool shouldStepForward)
 {
+  //set direction
+  if(shouldStepForward)
+  {
+    digitalWrite(DirectionPin, LOW);  
+  }
+  else
+  {
+    digitalWrite(DirectionPin, HIGH);
+  }
+  
+  PrintDirectionLineState();
+  PrintModeSetLineState();
+  PrintEnabledLineState();
+  Serial.print("\n");
+  
   for(int i = 0; i < steps; i++)
-  {    
-    currentStep -= 1;
+  {
+    
+    //toggle step pin
+    digitalWrite(StepPin, HIGH);
+    delay(1);
+    digitalWrite(StepPin, LOW);
+    delay(1);
+    
+    //housekeeping
+    if(shouldStepForward)
+    {
+      currentStep += 1;
+    }
+    else
+    {
+      currentStep -= 1;
+    }
     
     PrintCurrentStep();
-  } 
-}
-
-void RollStepperForward(int steps)
-{
-  for(int i = 0; i < steps; i++)
-  {    
-    currentStep += 1;
-    
-    PrintCurrentStep();
-  } 
+  }  
 }
 
 void SetStepMode(StepMode currentStepMode)
