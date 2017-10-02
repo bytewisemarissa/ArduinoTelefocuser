@@ -22,7 +22,7 @@
 
 //Constants
 #define MAX_BYTES 7
-#define MAX_STEP_BURST 5
+#define MAX_STEP_BURST 16
 #define SIG_START_UP 1
 #define VERSION 1
 
@@ -32,9 +32,9 @@ bool isDebugEnabled;
 bool isEnabled;
 bool isLimitSet;
 bool isSeeking; 
-int currentStep;
 int limitStep;
 int targetStep;
+long currentStep;
 StepMode currentStepMode;
 
 
@@ -63,7 +63,7 @@ void setup() {
   
   currentStepMode = FullStep;
 
-  Serial.begin(115200, SERIAL_8N1);
+  Serial.begin(9600, SERIAL_8N1);
   Serial.flush();
 
   HandleReturnCode(StartedUp);
@@ -88,69 +88,58 @@ void loop() {
 
 void ProcessCommand()
 {
-  if(inputBytes[0] == 'A')
+  char commandChar = inputBytes[0];
+  
+  switch(commandChar)
   {
-    HandleAbsolutePositionCommand();
-  }
-  else if(inputBytes[0] == 'd')
-  {
-    HandleDisableDebug(); 
-  }
-  else if(inputBytes[0] == 'D')
-  {
-    HandleEnableDebug(); 
-  }
-  else if(inputBytes[0] == 'e')
-  {
-    HandleLineDisable(); 
-  }
-  else if(inputBytes[0] == 'E')
-  {
-    HandleLineEnable();
-  }
-  else if(inputBytes[0] == 'H')
-  {
-    HandleHardStopCommand();
-  }
-  else if(inputBytes[0] == 'I')
-  {
-    HandleInfoCommand(); 
-  }
-  else if(inputBytes[0] == 'l')
-  {
-    HandleLimitUnSetCommand();
-  }
-  else if(inputBytes[0] == 'L')
-  {
-    HandleLimitSetCommand();
-  }
-  else if(inputBytes[0] == 'M')
-  {
-    HandleSetModeCommand();
-  }
-  else if(inputBytes[0] == 's')
-  {
-    HandleStepReverseCommand();
-  }
-  else if(inputBytes[0] == 'S')
-  {
-    HandleStepForwardCommand();
-  }
-  else if(inputBytes[0] == 'T')
-  {
-    HandleATOICommand();
-  }
-  else if(inputBytes[0] == 'V')
-  {
-    HandleVersionCommand();
-  }
-  else if(inputBytes[0] == 'Z')
-  {
-    HandleSetZeroCommand(); 
-  }
-  else
-  {
-    HandleReturnCode(UnknownCommand);
+    case 'A':
+      HandleAbsolutePositionCommand();
+      break;
+    case 'd':
+      HandleDisableDebug();
+      break;
+    case 'D':
+      HandleEnableDebug();
+      break;
+    case 'e':
+      HandleLineDisable(); 
+      break;
+    case 'E':
+      HandleLineEnable();
+      break;
+    case 'H':
+      HandleHardStopCommand();
+      break;
+    case 'I':
+      HandleInfoCommand(); 
+      break;
+    case 'l':
+      HandleLimitUnSetCommand();
+      break;
+    case 'L':
+      HandleLimitSetCommand();
+      break;
+    case 'M':
+      HandleSetModeCommand();
+      break;
+    case 's':
+      HandleStepReverseCommand();
+      break;
+    case 'S':
+      HandleStepForwardCommand();
+      break;
+    case 'T':
+      HandleATOICommand();
+      break;
+    case 'V':
+      HandleVersionCommand();
+      break;
+    case 'Z':
+      HandleSetZeroCommand(); 
+      break;
+    default:
+      HandleReturnCode(UnknownCommand);
+      break;
   }
   
   memset(inputBytes, 0, sizeof(inputBytes));
@@ -160,7 +149,7 @@ void SyncPinStates()
 {
   //sync pin states with logical flags
   bool enablePinStateCheck = digitalRead(EnablePin);
-  if(isEnabled != enablePinStateCheck)
+  if(isEnabled == enablePinStateCheck)
   {
     ToggleEnabledPin();  
   }
@@ -181,6 +170,7 @@ void WorkStepperMotor()
   if(isSeeking && currentStep != targetStep)
   {    
     int seekDifference = abs(currentStep - targetStep);
+    int currentModeResolution = GetStepFactorForStepMode(currentStepMode);
     
     int numberOfStepsToWork;
     if(seekDifference > MAX_STEP_BURST)
@@ -192,20 +182,65 @@ void WorkStepperMotor()
       numberOfStepsToWork = seekDifference; 
     }
     
+    int numberOfTriggers = numberOfStepsToWork / currentModeResolution;    
+    
+    if(isDebugEnabled)
+    {
+      Serial.print("Seek difference : ");
+      Serial.print(seekDifference);
+      Serial.print("\n");
+      
+      Serial.print("Current Mode Resolution : ");
+      Serial.print(currentModeResolution);
+      Serial.print("\n");
+    
+      Serial.print("Number of steps working this loop : ");
+      Serial.print(numberOfStepsToWork);
+      Serial.print("\n");
+    
+      Serial.print("Current Step : ");
+      Serial.print(currentStep);
+      Serial.print("\n");
+      
+      Serial.print("Target Step : ");
+      Serial.print(targetStep);
+      Serial.print("\n");
+      
+      Serial.print("Number of triggers : ");
+      Serial.print(numberOfTriggers);
+      Serial.print("\n");
+    }
+    
     if(currentStep > targetStep)
     {
-      TriggerStepper(numberOfStepsToWork, false);
+      if(isDebugEnabled){ Serial.print("Going backward.\n"); }
+      TriggerStepper(numberOfTriggers, false);
     }
     else
     {
-      TriggerStepper(numberOfStepsToWork, true);
+      if(isDebugEnabled){ Serial.print("Going forward.\n"); }
+      TriggerStepper(numberOfTriggers, true);
     }
     
     if(currentStep == targetStep)
     {
+      if(isDebugEnabled){ Serial.print("Done Seeking.\n"); }
       isSeeking = false; 
     }
+    
+    if(isDebugEnabled){ Serial.print("\n"); }
   }
+}
+
+void SettleSubStepOverhang(int seekDifference, bool isMovingForward)
+{
+  Serial.print("Tripped Overhang Behavior/n");
+  StepMode savedStepMode = currentStepMode;
+  currentStepMode = EigthStep;
+  SetStepMode(currentStepMode);
+  TriggerStepper(seekDifference, isMovingForward);
+  SetStepMode(savedStepMode);
+  currentStepMode = savedStepMode;
 }
 
 /************************************
@@ -214,7 +249,19 @@ void WorkStepperMotor()
 
 void HandleAbsolutePositionCommand()
 {
+  if(!isEnabled)
+  {
+    HandleReturnCode(NotEnabled);  
+    return;
+  }
+  
   int absoluteStep = ConvertBufferToInt();
+  
+  if(absoluteStep % GetStepFactorForStepMode(currentStepMode) != 0)
+  {
+    HandleReturnCode(NotModeMultiple);  
+    return;
+  }
     
   if(absoluteStep < 0)
   {
@@ -350,14 +397,25 @@ void HandleSetModeCommand()
 {
   int modeId = ConvertBufferToInt();
   StepMode requestedMode = ConvertIdToStepMode(modeId);
-  currentStepMode = requestedMode;
-  HandleReturnCode(OK);
+  
+  if(requestedMode != InvalidStepMode)
+  {
+    currentStepMode = requestedMode; 
+    HandleReturnCode(OK);  
+  }
 }
 
 void HandleStepReverseCommand()
 {
+  if(!isEnabled)
+  {
+    HandleReturnCode(NotEnabled);  
+    return;
+  }
+  
   int relativeSteps = ConvertBufferToInt();    
-  int targetedPosition = currentStep - relativeSteps;
+  int convertedSteps = GetStepFactorForStepMode(currentStepMode) * relativeSteps;
+  int targetedPosition = currentStep - convertedSteps;
    
   if(targetedPosition < 0)
   {
@@ -378,8 +436,15 @@ void HandleStepReverseCommand()
 
 void HandleStepForwardCommand()
 {
-  int relativeSteps = ConvertBufferToInt();  
-  int targetedPosition = currentStep + relativeSteps;
+  if(!isEnabled)
+  {
+    HandleReturnCode(NotEnabled); 
+    return; 
+  }
+  
+  int relativeSteps = ConvertBufferToInt(); 
+  int convertedSteps = GetStepFactorForStepMode(currentStepMode) * relativeSteps;
+  int targetedPosition = currentStep + convertedSteps;
     
   if(targetedPosition < 0)
   {
@@ -512,6 +577,15 @@ void HandleReturnCode(ReturnCode code)
     case BeyondZeroBound:
       Serial.write("R!BZB\n");
       break;
+    case NotEnabled:
+      Serial.write("R!NE\n");
+      break;
+    case NotModeMultiple:
+      Serial.write("R!NMM\n");
+      break;
+    case InvalidMode:
+      Serial.write("R!IM\n");
+      break;
     default:
       Serial.write("R!URC\n");
       return;
@@ -615,7 +689,8 @@ StepMode ConvertIdToStepMode(int modeId)
     case 3:
      return EigthStep;
     default:
-     return FullStep;
+     HandleReturnCode(InvalidMode);
+     return InvalidStepMode;
   }
 }
 
@@ -665,14 +740,60 @@ void ResetMotorDriverPins()
   isEnabled = false;
 }
 
+int GetStepFactorForStepMode(StepMode mode)
+{
+  switch(currentStepMode)
+  {
+    case FullStep:
+      return 8;
+      break;
+    case HalfStep:
+      return 4;
+      break;
+    case QuarterStep:
+      return 2;
+      break;
+    case EigthStep:
+      return 1;
+      break;
+  }
+}
+
+void UpdateCurrentStep(bool isMovingForward)
+{
+  
+  int stepAmount = GetStepFactorForStepMode(currentStepMode); 
+  
+  if(isDebugEnabled)
+  {
+    Serial.print("Update Current Step By : ");
+    Serial.print(stepAmount);
+    Serial.print("\n");  
+  }
+  
+  if(isMovingForward)
+  {
+    currentStep += stepAmount;  
+  }
+  else
+  {
+    currentStep -= stepAmount;
+  }
+}
+
 /************************************
 *  Stepper Helper Methods           *
 ************************************/
 
-void TriggerStepper(int steps, bool shouldStepForward)
+void TriggerStepper(int steps, bool isMovingForward)
 {
+  if(!isEnabled)
+  {
+    return;  
+  }
+  
   //set direction
-  if(shouldStepForward)
+  if(isMovingForward)
   {
     digitalWrite(DirectionPin, LOW);  
   }
@@ -680,11 +801,6 @@ void TriggerStepper(int steps, bool shouldStepForward)
   {
     digitalWrite(DirectionPin, HIGH);
   }
-  
-  PrintDirectionLineState();
-  PrintModeSetLineState();
-  PrintEnabledLineState();
-  Serial.print("\n");
   
   for(int i = 0; i < steps; i++)
   {
@@ -695,16 +811,7 @@ void TriggerStepper(int steps, bool shouldStepForward)
     digitalWrite(StepPin, LOW);
     delay(1);
     
-    //housekeeping
-    if(shouldStepForward)
-    {
-      currentStep += 1;
-    }
-    else
-    {
-      currentStep -= 1;
-    }
-    
+    UpdateCurrentStep(isMovingForward);
     PrintCurrentStep();
   }  
 }
@@ -736,11 +843,11 @@ void ToggleEnabledPin()
 {
   if(isEnabled)
   {
-    digitalWrite(EnablePin, HIGH);
+    digitalWrite(EnablePin, LOW);
   }
   else
   {
-    digitalWrite(EnablePin, LOW);
+    digitalWrite(EnablePin, HIGH);
   }  
 }
 

@@ -1,12 +1,15 @@
 typedef enum ReturnCode{
-  StartedUp,
-  OK,
-  Error,
+  BeyondLimitBound,
+  BeyondZeroBound,
+  CurrentlySeeking,
   DebugRequired,
+  Error,
+  NotCurrentlySeeking,
+  NotEnabled,
+  NotModeMultiple,
+  OK,
+  StartedUp,
   UnknownCommand,
   Version,
-  CurrentlySeeking,
-  NotCurrentlySeeking,
-  BeyondLimitBound,
-  BeyondZeroBound
+  InvalidMode
 };

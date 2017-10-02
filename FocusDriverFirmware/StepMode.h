@@ -2,5 +2,6 @@ typedef enum StepMode{
    FullStep,
    HalfStep,
    QuarterStep,
-   EigthStep
+   EigthStep,
+   InvalidStepMode
 };
