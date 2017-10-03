@@ -7,6 +7,8 @@
 #define ModeSet1Pin 4
 #define ModeSet2Pin 5
 #define EnablePin 6 // HIGH is Disabled, LOW is Enabled
+#define EnableButtonDriverPin 9
+#define EnableButtonSensePin 8
 
 /**********************************************
 * Microstep Select Resolution Truth Table     *
@@ -48,6 +50,8 @@ void setup() {
   pinMode(ModeSet1Pin, OUTPUT);
   pinMode(ModeSet2Pin, OUTPUT);
   pinMode(EnablePin, OUTPUT);
+  pinMode(EnableButtonDriverPin, OUTPUT);
+  pinMode(EnableButtonSensePin, INPUT);
   ResetMotorDriverPins(); 
   
   memset(inputBytes, 0, sizeof(inputBytes));
@@ -65,6 +69,8 @@ void setup() {
 
   Serial.begin(9600, SERIAL_8N1);
   Serial.flush();
+  
+  digitalWrite(EnableButtonDriverPin, HIGH);
 
   HandleReturnCode(StartedUp);
 }
@@ -80,6 +86,8 @@ void loop() {
       Serial.flush();
     }
   }
+  
+  SenseInputs();
   
   SyncPinStates();
   
@@ -100,12 +108,6 @@ void ProcessCommand()
       break;
     case 'D':
       HandleEnableDebug();
-      break;
-    case 'e':
-      HandleLineDisable(); 
-      break;
-    case 'E':
-      HandleLineEnable();
       break;
     case 'H':
       HandleHardStopCommand();
@@ -143,6 +145,12 @@ void ProcessCommand()
   }
   
   memset(inputBytes, 0, sizeof(inputBytes));
+}
+
+void SenseInputs()
+{
+  bool isEnableButtonFlipped = digitalRead(EnableButtonSensePin);
+  isEnabled = isEnableButtonFlipped; 
 }
 
 void SyncPinStates()
@@ -289,18 +297,6 @@ void HandleDisableDebug()
 void HandleEnableDebug()
 {
   isDebugEnabled = true;
-  HandleReturnCode(OK);
-}
-
-void HandleLineDisable()
-{
-  isEnabled = false;
-  HandleReturnCode(OK);
-}
-
-void HandleLineEnable()
-{
-  isEnabled = true;
   HandleReturnCode(OK);
 }
 
