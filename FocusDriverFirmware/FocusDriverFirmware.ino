@@ -13,12 +13,12 @@
 /**********************************************
 * Microstep Select Resolution Truth Table     *
 *                                             *
-*  MS1 	MS2 	Microstep Resolution          *
+*  MS1 	MS2 	Microstep Resolution            *
 *  ---------------------------------          *
-*   L	  L	Full Step (2 Phase)           *
-*   H	  L	Half Step                     *
-*   L	  H	Quarter Step                  *
-*   H  	  H	Eigth Step                    *
+*   L	  L	    Full Step (2 Phase)             *
+*   H	  L	    Half Step                       *
+*   L	  H	    Quarter Step                    *
+*   H  	H	    Eigth Step                      *
 *                                             *
 **********************************************/
 
@@ -80,7 +80,7 @@ void loop() {
   {
     int bytesRead = Serial.readBytesUntil('\n', (char*)inputBytes, MAX_BYTES); //pull command from serial buffer
 
-    if(inputBytes[0] != 240)
+    if(bytesRead > 0)
     {
       ProcessCommand();//process the command
       Serial.flush();
