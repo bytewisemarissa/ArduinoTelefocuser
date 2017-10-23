@@ -13,12 +13,12 @@
 /**********************************************
 * Microstep Select Resolution Truth Table     *
 *                                             *
-*  MS1 	MS2 	Microstep Resolution            *
+*  MS1 	MS2 	Microstep Resolution          *
 *  ---------------------------------          *
-*   L	  L	    Full Step (2 Phase)             *
-*   H	  L	    Half Step                       *
-*   L	  H	    Quarter Step                    *
-*   H  	H	    Eigth Step                      *
+*   L	  L	    Full Step (2 Phase)       *
+*   H	  L	    Half Step                 *
+*   L	  H	    Quarter Step              *
+*   H  	H	    Eigth Step                *
 *                                             *
 **********************************************/
 
@@ -348,6 +348,7 @@ void HandleInfoCommand()
     case 'R':
       Serial.write("IR");
       PrintDirectionLineState();
+      break;
     case 'S':
       Serial.write("IS");
       Serial.print(isSeeking);
